@@ -21,7 +21,7 @@
                                    rebuilt in Rust  ·  MMXXVI
 ```
 
-*Native. Modular. Deterministic. Written in Rust.*
+*Rust in Pieces.*
 
 </div>
 
@@ -168,6 +168,72 @@ You will need the original game data to run the full game. `max-core` tests do n
 - Rust 1.75 or newer
 - Original M.A.X. (1996) game data for full play (not required for core tests)
 
+## FAQ
+
+<details>
+<summary><strong>Why not just run M.A.X. Port?</strong></summary>
+
+M.A.X. Port is a C++ reimplementation that already runs on modern systems. If your goal is simply to play the game, use it — it works, and it is actively maintained.
+
+`max-rust` exists for a different reason: to rebuild the game around Rust's ownership model and a modular workspace. The C++ port still carries legacy constraints — custom smart pointers, a monolithic GNW platform layer, and 32-bit assumptions that block clean 64-bit builds. Rust lets us remove those constraints at the architectural level rather than patching around them.
+
+</details>
+
+<details>
+<summary><strong>Do I need the original M.A.X. CD to play?</strong></summary>
+
+Yes, for the full game. `max-rust` does not ship game assets — maps, sprites, sounds, and unit data come from the original 1996 release, just as M.A.X. Port requires.
+
+The `max-core` crate, however, is designed to be tested on synthetic data. You can run `cargo test --workspace` and validate game logic without the CD. Only the data layer (`max-data`) and the playable binary need original resources.
+
+</details>
+
+<details>
+<summary><strong>Why GPL-3.0?</strong></summary>
+
+To match the upstream M.A.X. Port project. Since `max-rust` is a port of that codebase and reads its data formats, staying on the same license keeps the lineage clean and avoids license friction for anyone comparing or contributing to both.
+
+</details>
+
+<details>
+<summary><strong>Will this fix the original's bugs?</strong></summary>
+
+Some of them, structurally. The most famous defect in the original game — a crash around turn 120 caused by a stack overflow — does not reproduce in Rust, because the bug was tied to the DOS-era memory model and the Watcom toolchain rather than to game logic.
+
+Other fixes depend on the subsystem. Gameplay behavior is intentionally reproduced, not rebalanced, so "fixing" a balance issue would require an explicit decision rather than a silent change.
+
+</details>
+
+<details>
+<summary><strong>Is there multiplayer?</strong></summary>
+
+Not yet, and not in the near term. The roadmap is single-player first: get the core, AI, data loading, and a minimal playable loop working before adding networking. If multiplayer lands, it will be a separate crate (`max-net`) that depends on `max-core` but does not touch rendering or input.
+
+</details>
+
+<details>
+<summary><strong>Why not use `shared_ptr`-style semantics for units?</strong></summary>
+
+Because Rust gives us something better: explicit ownership via IDs. In the C++ port, units are managed through custom smart pointers and global managers, which makes ownership implicit and cyclic references possible. In `max-rust`, `World` owns all units, and systems refer to them by `UnitId`. This removes the need for reference counting, eliminates cycles by construction, and makes serialization and testing straightforward.
+
+</details>
+
+<details>
+<summary><strong>Can I contribute before the core is runnable?</strong></summary>
+
+Yes, but the project is in architectural phase. The most useful contributions right now are design discussions, not code: review the crate boundaries, propose the shape of the `AiController` trait, or map out original data formats in `max-data/src/formats/`.
+
+Open an issue describing the subsystem you are interested in before submitting a PR. Once `max-core` is stable and the first playable loop exists, the contribution surface will widen considerably.
+
+</details>
+
+<details>
+<summary><strong>Why the name "max-rust"?</strong></summary>
+
+It follows the pattern established by the C++ port: keep the original game's name, append the language. `M.A.X.` stays recognizable, and `-rust` makes it clear which implementation you are looking at. The tagline — *Rust in Pieces* — is just the obvious joke.
+
+</details>
+
 ## References
 
 - **C++ source:** [klei1984/max](https://github.com/klei1984/max) — M.A.X. Port
@@ -186,6 +252,6 @@ Contributions are welcome once the core is runnable. Until then, the project is 
 
 <div align="center">
 
-*"Mechanized Assault & Exploration" — rebuilt in Rust, one crate at a time.*
+*Rust in Pieces — one crate at a time.*
 
 </div>
