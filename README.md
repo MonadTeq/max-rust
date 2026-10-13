@@ -1,6 +1,6 @@
 <div align="center">
 
-# max-rust
+# M.A.X. : RUST
 
 **A modular Rust port of M.A.X. (1996) — the turn-based strategy classic by Interplay**
 
