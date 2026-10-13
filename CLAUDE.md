@@ -1,111 +1,213 @@
-# CLAUDE.md — max-rust
+# CLAUDE.md — MAX Rust
 
-A Rust port of M.A.X. (1996, Interplay), based on the C++ project
-M.A.X. Port (klei1984/max). Goal: a natively running turn-based
-strategy game on modern platforms, with the original's defects fixed
-and a modular architecture.
+Rust port of M.A.X. (1996, Interplay), built on top of the C++ project
+M.A.X. Port (klei1984/max). The project runs in parallel with an
+ongoing decompilation effort: we analyze the original binary and the
+C++ port to reproduce game logic faithfully, then reimplement it in
+Rust.
 
 ## Core principle
 
-This is NOT a mechanical translation of C++ code. We rethink the
-structure to fit Rust idioms. If a C++ solution conflicts with Rust's
-ownership model or modularity, we choose the Rust way, not the C++
-copy.
+This is NOT a mechanical translation of C++. We rethink structure to
+fit Rust idioms. When C++ and Rust conflict, the Rust way wins — except
+where game logic behavior must be preserved exactly.
 
-## Workspace layout
+## Repository layout
 
-Cargo workspace, each module is a separate crate. Split compilation
-is mandatory: editing AI must not rebuild the renderer.
+    max-rust/
+      Cargo.toml              # workspace virtual manifest
+      CLAUDE.md               # this file
+      crates/
+        max-core/             # pure game logic, no platform deps
+        max-data/             # original resource loaders (.DTA, maps, sprites)
+        max-ai/               # AI controllers (move, build, attack, explore)
+        max-render/           # map and unit rendering
+        max-ui/               # menus, panels, dialogs
+        max-audio/            # sound and music
+        max-input/            # input -> commands for max-core
+        max-net/              # network transport and lobby
+        max-bin/              # entry point binary
+      docs/
+        decompilation/        # notes on original binary analysis
+        formats/              # reverse-engineered file format specs
+        network/              # protocol notes, packet captures, ENET details
+      reference/
+        original-asm/         # disassembly listings (read-only)
+        cpp-port/             # snapshot of M.A.X. Port sources (read-only)
 
-    crates/
-      max-core/     # pure world logic: units, map, turns, combat,
-                    # resources. NO platform, window, file, or audio
-                    # dependencies.
-      max-data/     # loading original resources (.DTA, maps, sprites).
-                    # Populates max-core structs.
-      max-ai/       # computer controllers (move, build, attack,
-                    # explore, player). Connects to max-core via
-                    # traits, not the other way around.
-      max-render/   # drawing the map, units, effects.
-      max-ui/       # game interface: menus, panels, dialogs.
-      max-audio/    # sound and music.
-      max-input/    # input (mouse, keyboard, touch) -> commands for
-                    # the core.
-      max-bin/      # entry point, wires everything together.
+## Dependency rules (never violate)
 
-## Dependency boundaries (must not be violated)
-
-    max-core   depends only on std (+ serde if needed)
+    max-core   -> std only (+ serde if needed)
     max-data   -> max-core
     max-ai     -> max-core
     max-render -> max-core
     max-ui     -> max-core
-    max-audio  -> (nothing from the project)
+    max-audio  -> (nothing from this project)
     max-input  -> max-core (command types only)
+    max-net    -> max-core (command/event types only)
     max-bin    -> everything
 
-max-core NEVER imports winit, wgpu, egui, rodio, or anything else
-platform-specific. If the urge appears, the logic is in the wrong
-crate.
+max-core NEVER imports winit, wgpu, egui, rodio, tokio, enet, or any
+platform or network crate. If the urge appears, the logic belongs in
+another crate.
 
-## What we replace from C++
+## Build and test
 
-- Custom SmartPtr/SmartList/SmartArray -> Vec<T>, HashMap<Id, T>,
-  ownership via IDs. We do not carry over shared_ptr semantics.
-- Global managers (unitsmgr, gamemgr) -> a World struct in max-core,
-  passed as &mut World into systems.
-- GNW (platform layer) -> winit + wgpu/softbuffer + egui. GNW is not
-  ported.
-- smart file managers -> serde or hand-written byte parsers in max-data.
-- AI as a set of global functions -> an AiController trait.
+    cargo build --workspace
+    cargo test --workspace
+    cargo test -p max-core        # core tests use synthetic data only
+    cargo clippy --workspace -- -D warnings
+    cargo fmt --all
+
+max-core tests must run without the original game CD, without a
+window, and without a network. If a test needs real game data or a
+socket, it belongs in max-data, max-net, or max-bin — not in max-core.
+
+## Network
+
+M.A.X. Port implements network play, and max-rust ports that subsystem
+rather than inventing a new one. Key facts:
+
+- The C++ port uses the ENET library for reliable UDP transport.
+- The host multicasts messages to clients; there is a network lobby
+  with scenario and mission selection.
+- Network behavior is part of the decompilation target, not a
+  greenfield feature. Reproduce it where practical.
+
+### max-net boundaries
+
+- max-net depends on max-core for Command and Event types only.
+  It never touches World directly.
+- Commands flow over the network and are applied through the same API
+  used by max-input and max-ai. There is no side channel into World.
+- Simulation is deterministic and lockstep-oriented. If two Worlds
+  diverge under the same command sequence, that is a max-core bug, not
+  a max-net bug.
+- Transport choice (ENET bindings, laminar, or a custom UDP layer) is
+  an implementation detail inside max-net. max-core must not know which
+  one is used.
+
+### Network decompilation notes
+
+- Document protocol details in docs/network/ — packet layout, handshake,
+  lobby state machine, reconnect behavior.
+- When reproducing a network behavior, add a doc comment with the
+  original symbol or the C++ function name, same convention as
+  game-logic functions.
+- If we deliberately deviate from the C++ port (for example, replacing
+  IPX-era semantics with modern equivalents), record the decision in
+  docs/decompilation/decisions.md.
+
+## Decompilation workflow
+
+We maintain byte-level fidelity with the original where game logic is
+concerned. The workflow is:
+
+1. Analyze the original binary (or the C++ port, when it already
+   reimplements the function faithfully).
+2. Record findings in docs/decompilation/ — function purpose, inputs,
+   outputs, side effects, edge cases, offsets.
+3. Map the function to a Rust module and signature.
+4. Implement, then verify against the original behavior using recorded
+   test cases or replay data.
+
+For network code, the same workflow applies, but findings go to
+docs/network/ instead of docs/decompilation/.
+
+### Rules for decompilation work
+
+- reference/original-asm/ and reference/cpp-port/ are READ-ONLY. Never
+  edit them. They are reference snapshots.
+- Every non-trivial reimplementation must have a corresponding note in
+  docs/decompilation/ (or docs/network/ for network code) explaining
+  what was reproduced and what was intentionally changed.
+- When behavior is ambiguous, reproduce the original, even if it looks
+  like a bug. Mark it with a comment: `// ORIGINAL BEHAVIOR: <explain>`.
+- Do not "improve" balance, AI heuristics, combat math, or network
+  timing without an explicit decision recorded in
+  docs/decompilation/decisions.md.
+- The original's ~120-turn crash from stack overflow is NOT reproduced.
+  Rust's memory model makes it impossible by construction. This is a
+  feature; note it where relevant.
+
+### Naming convention for decompiled functions
+
+Rust modules that reimplement a specific original function should carry
+a doc comment with the original symbol:
+
+    /// Reimplements: UNIT_MoveUnit (original offset 0x000A1234)
+    /// Source: docs/decompilation/unit/move_unit.md
+    pub fn move_unit(...) -> Result<(), MoveError> { ... }
+
+For network functions, reference the C++ port symbol or the packet
+name:
+
+    /// Reimplements: NET_SendLobbyUpdate (M.A.X. Port)
+    /// Source: docs/network/lobby.md
+    pub fn send_lobby_update(...) -> Result<(), NetError> { ... }
+
+This makes it trivial to trace any Rust function back to its
+decompilation note and to the original binary offset.
 
 ## Code conventions
 
-- Entity identifiers: newtype wrappers.
-    struct UnitId(u32); struct PlayerId(u8); struct TilePos { x: i16, y: i16 }
+- Entity IDs are newtype wrappers:
+    struct UnitId(u32); struct PlayerId(u8);
+    struct TilePos { x: i16, y: i16 }
 - Turn logic is deterministic. No rand() without an explicit seed.
-  RNG is injected into World or into the system.
+  The RNG is injected into World or into the system that needs it.
 - Errors: thiserror in library crates, anyhow only in max-bin.
 - No panics in max-core on game data. Only Result.
 - Public crate API is minimal. Everything else is pub(crate).
-- Tests: unit tests in each crate, integration tests in max-bin.
-  max-core is tested on synthetic data without original resources
-  and without a window.
+- unsafe requires a comment explaining why it is necessary and why the
+  invariants hold.
 
-## Original data
+## What we replace from C++
 
-Loading .DTA and sprites lives only in max-data. The core works with
-ready-made structs. This lets us test logic without the game CD.
-Format loaders are documented in max-data/src/formats/.
+| C++ (M.A.X. Port)                  | Rust (max-rust)                          |
+|------------------------------------|------------------------------------------|
+| SmartPtr / SmartList / SmartArray  | Vec<T>, HashMap<Id, T>, ownership via IDs |
+| Global managers (unitsmgr, gamemgr)| World struct passed as &mut World        |
+| GNW platform layer                 | winit + wgpu/softbuffer + egui           |
+| smart file managers                | serde or hand-written byte parsers       |
+| AI as global functions             | AiController trait                       |
+| ENET via C++ wrappers              | max-net crate (transport is internal)    |
 
-## Compatibility with the original
-
-- Game logic must reproduce M.A.X. Port behavior, not "improve
-  balance" without an explicit decision.
-- Saves: if we implement compatibility with original save files, that
-  is a separate module in max-data, not in the core.
-- The original's known defect (~120-turn crash from stack overflow)
-  does not reproduce in Rust. That is a feature, not a bug.
-
-## What NOT to do
-
-- Do not add a max-core dependency on game crates "just quickly."
-- Do not use unsafe without a justifying comment.
-- Do not copy C++ structures 1:1 if they do not fit Rust.
-- Do not start by parsing original resources. Core on synthetics
-  first, data later.
-- Do not bring in GNW.
+GNW is not ported. It is tied to 32-bit extensions and blocks clean
+64-bit builds.
 
 ## Development order
 
-1. max-core: World, Unit, map, turn, combat. Tests on synthetics.
+1. max-core: World, Unit, map, turn, combat. Synthetic-data tests.
 2. max-ai: one simple controller playing against itself.
 3. max-data: loading maps and unitvalues from original files.
-4. max-render + max-input + max-ui: a minimal playable loop.
-5. max-audio, remaining AI, saves, networking — later.
+4. max-render + max-input + max-ui: minimal playable loop.
+5. max-audio, remaining AI, saves.
+6. max-net: transport, lobby, lockstep verification.
+
+Network comes last because it requires a stable, deterministic
+max-core. Building it earlier means building on sand.
+
+## What NOT to do
+
+- Do not add a max-core dependency on game, platform, or network
+  crates "just quickly."
+- Do not edit reference/original-asm/ or reference/cpp-port/.
+- Do not copy C++ structures 1:1 if they do not fit Rust.
+- Do not start by parsing original resources. Core on synthetics first.
+- Do not bring in GNW.
+- Do not silently change game behavior. Document it or reproduce it.
+- Do not put network types (sockets, packets, peers) into max-core.
+  Command and Event are the only network-facing types in the core.
+- Do not commit large binary files (original game data, packet
+  captures) to the repo.
 
 ## References
 
 - C++ source: klei1984/max (M.A.X. Port)
-- Data for comparison: maxr-dot-org/maxr (resource structure)
+- Network docs: https://klei1984.github.io/max/network/
+- Data structure reference: maxr-dot-org/maxr
 - Original game: M.A.X. (1996), Interplay
+- Decompilation notes: docs/decompilation/
+- Network notes: docs/network/
+- Format specs: docs/formats/
