@@ -1,4 +1,4 @@
-# CLAUDE.md — MAX Rust
+# CLAUDE.md — M.A.X.: Rust
 
 Rust port of M.A.X. (1996, Interplay), built on top of the C++ project
 M.A.X. Port (klei1984/max). The project runs in parallel with an
