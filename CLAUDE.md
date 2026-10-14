@@ -202,6 +202,31 @@ max-core. Building it earlier means building on sand.
 - Do not commit large binary files (original game data, packet
   captures) to the repo.
 
+## Architecture style
+
+We apply the dependency rule of Clean Architecture, adapted for a
+game:
+
+- max-core is the innermost layer. It declares ports (traits) for
+  things it needs from the outside: CommandSource, EventSink,
+  GameStorage. Implementations live in outer crates.
+- Outer crates (max-ai, max-input, max-net, max-render, max-ui,
+  max-data) depend on max-core, never the reverse.
+- Dependencies flow inward only. If an outer crate needs something
+  from the core, the core exposes a type or trait; the outer crate
+  does not reach into internals.
+
+Deliberate deviations from canonical Clean Architecture:
+
+- Time and turn count are data in World, not a Clock port. This
+  preserves determinism for lockstep and replays.
+- Rendering reads &World directly for interpolation and effects.
+  It must not mutate World; all mutations go through Commands.
+- Network is treated as a second driver of the core, not as a mere
+  adapter. It uses the same Command/Event boundary as local input.
+
+Record any further deviation in docs/decompilation/decisions.md.
+
 ## References
 
 - C++ source: klei1984/max (M.A.X. Port)
